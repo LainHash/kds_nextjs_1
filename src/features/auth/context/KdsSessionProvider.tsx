@@ -39,6 +39,8 @@ interface KdsSessionContextValue {
   user: AuthUser | null;
   permissions: UserPermissionsResponse | null;
   canUpdatePreparation: boolean;
+  canCancelOrders: boolean;
+  canConfirmOrders: boolean;
   isGlobalScope: boolean;
   assignedBranchId: string | null;
   canSwitchBranch: boolean;
@@ -304,6 +306,26 @@ export function KdsSessionProvider({ children }: { children: ReactNode }) {
     [user, permissions]
   );
 
+  const canCancelOrders = useMemo(
+    () =>
+      hasKdsPermission(
+        user,
+        permissions,
+        KDS_REQUIRED_PERMISSIONS.cancelOrders
+      ),
+    [user, permissions]
+  );
+
+  const canConfirmOrders = useMemo(
+    () =>
+      hasKdsPermission(
+        user,
+        permissions,
+        KDS_REQUIRED_PERMISSIONS.confirmOrders
+      ),
+    [user, permissions]
+  );
+
   const value = useMemo<KdsSessionContextValue>(
     () => ({
       isReady: isHydrated,
@@ -311,6 +333,8 @@ export function KdsSessionProvider({ children }: { children: ReactNode }) {
       user,
       permissions,
       canUpdatePreparation,
+      canCancelOrders,
+      canConfirmOrders,
       isGlobalScope: isHydrated ? branchAccess.isGlobalScope : false,
       assignedBranchId: isHydrated ? branchAccess.assignedBranchId : null,
       canSwitchBranch: isHydrated ? branchAccess.canSwitchBranch : false,
@@ -329,6 +353,8 @@ export function KdsSessionProvider({ children }: { children: ReactNode }) {
       user,
       permissions,
       canUpdatePreparation,
+      canCancelOrders,
+      canConfirmOrders,
       branchAccess.isGlobalScope,
       branchAccess.assignedBranchId,
       branchAccess.canSwitchBranch,

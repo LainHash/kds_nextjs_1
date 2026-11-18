@@ -8,6 +8,7 @@ import { cn } from "@/lib/utils";
 
 const NAV_ITEMS = [
   { href: "/", label: "Bếp (Live)" },
+  { href: "/history", label: "Lịch sử & Recall" },
   { href: "/branches", label: "Chi nhánh & Bàn" },
   { href: "/products", label: "Thực đơn & Kho" },
 ] as const;

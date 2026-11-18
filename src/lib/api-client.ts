@@ -40,13 +40,22 @@ function buildUrl(path: string): string {
   return baseUrl ? `${baseUrl}${normalizedPath}` : normalizedPath;
 }
 
+export type QueryParamPrimitive = string | number | boolean | null | undefined;
+export type QueryParamValue = QueryParamPrimitive | QueryParamPrimitive[];
+
 export function buildQueryString(
-  params?: Record<string, string | number | boolean | null | undefined>
+  params?: Record<string, QueryParamValue>
 ): string {
   if (!params) return "";
   const searchParams = new URLSearchParams();
   for (const [key, value] of Object.entries(params)) {
-    if (value !== undefined && value !== null && value !== "") {
+    if (Array.isArray(value)) {
+      for (const item of value) {
+        if (item !== undefined && item !== null && item !== "") {
+          searchParams.append(key, String(item));
+        }
+      }
+    } else if (value !== undefined && value !== null && value !== "") {
       searchParams.set(key, String(value));
     }
   }

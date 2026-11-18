@@ -12,6 +12,8 @@ export const KDS_REQUIRED_PERMISSIONS = {
   updatePreparation: "commerce:order-preparations:update",
   readPreparation: "commerce:order-preparations:read",
   readOrders: "commerce:orders:read",
+  confirmOrders: "commerce:orders:confirm",
+  cancelOrders: "commerce:orders:cancel",
 } as const;
 
 export const KDS_STAFF_ROLES = [
