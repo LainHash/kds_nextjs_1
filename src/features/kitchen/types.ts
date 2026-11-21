@@ -63,6 +63,9 @@ export interface OrderResponse {
   branchId: string;
   subtotal: number;
   discountAmount: number;
+  voucherId?: string | null;
+  voucherCode?: string | null;
+  voucherDiscountAmount?: number;
   taxAmount: number;
   deliveryFee: number;
   totalAmount: number;

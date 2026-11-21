@@ -196,6 +196,7 @@ export function OrderDetailDrawer({
               {order.discountAmount > 0 && (
                 <p className="text-[11px] text-emerald-700">
                   Giảm: -{formatCurrencyVnd(order.discountAmount)}
+                  {order.voucherCode ? ` (${order.voucherCode})` : ""}
                 </p>
               )}
               {order.deliveryFee > 0 && (

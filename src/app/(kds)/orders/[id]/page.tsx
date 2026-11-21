@@ -550,7 +550,8 @@ function OrderDetailPageContent() {
               {formatCurrencyVnd(order.subtotal)}{" "}
               {order.discountAmount > 0 && (
                 <span className="text-xs font-medium text-emerald-700">
-                  (-{formatCurrencyVnd(order.discountAmount)})
+                  (-{formatCurrencyVnd(order.discountAmount)}
+                  {order.voucherCode ? ` · ${order.voucherCode}` : ""})
                 </span>
               )}
             </p>
