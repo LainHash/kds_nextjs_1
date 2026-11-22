@@ -6,6 +6,11 @@ import { useKdsSession } from "@/features/auth/context/KdsSessionProvider";
 import { getBranches } from "@/features/territory/services/territory.service";
 import type { BranchResponse } from "@/features/territory/types";
 import { ApiError } from "@/lib/api-client";
+import {
+  getBranchStatusLabel,
+  getTableShapeLabel,
+  getTableStatusLabel,
+} from "@/lib/enum-labels";
 import { cn } from "@/lib/utils";
 
 function getTableStatusBadgeClass(status: string): string {
@@ -207,7 +212,7 @@ export default function BranchesPage() {
                             : "border-slate-200 bg-slate-100 text-slate-700"
                         )}
                       >
-                        {branch.status}
+                        {getBranchStatusLabel(branch.status)}
                       </span>
                     </div>
 
@@ -331,14 +336,14 @@ export default function BranchesPage() {
                         getTableStatusBadgeClass(table.status)
                       )}
                     >
-                      {table.status}
+                      {getTableStatusLabel(table.status)}
                     </span>
                   </div>
                   <p className="mt-1 truncate text-xs text-slate-600">
                     {table.areaName || "Khu chung"}
                   </p>
                   <p className="mt-0.5 text-[11px] text-slate-500">
-                    {table.capacity} chỗ &bull; {table.shape}
+                    {table.capacity} chỗ &bull; {getTableShapeLabel(table.shape)}
                   </p>
                 </div>
               ))}

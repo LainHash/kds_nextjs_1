@@ -514,9 +514,9 @@ export default function KitchenHistoryPage() {
             className="rounded-xl border border-slate-300 bg-white px-3 py-1.5 text-xs font-medium text-slate-700 outline-none focus:border-amber-500"
           >
             <option value="ALL">Loại đơn: Tất cả</option>
-            <option value="DineIn">Ăn tại bàn (Dine In)</option>
-            <option value="TakeAway">Mang về (Take Away)</option>
-            <option value="Delivery">Giao hàng (Delivery)</option>
+            <option value="DineIn">Ăn tại bàn</option>
+            <option value="TakeAway">Mang về</option>
+            <option value="Delivery">Giao hàng</option>
           </select>
         </div>
 
