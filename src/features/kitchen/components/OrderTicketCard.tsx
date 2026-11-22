@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import { memo, useEffect, useState } from "react";
 import type { TableLookupEntry } from "@/features/territory/types";
 import { cn } from "@/lib/utils";
 import type {
@@ -52,7 +53,53 @@ interface OrderTicketCardProps {
   ) => void;
 }
 
-export function OrderTicketCard({
+interface LiveSlaBadgeProps {
+  order: OrderDetailResponse;
+  slaThresholds: SlaThresholdConfig;
+  isReadyStage: boolean;
+}
+
+function LiveSlaBadge({
+  order,
+  slaThresholds,
+  isReadyStage,
+}: LiveSlaBadgeProps) {
+  const [tickNowMs, setTickNowMs] = useState<number>(() => Date.now());
+
+  useEffect(() => {
+    if (isReadyStage) return;
+    const timer = window.setInterval(() => {
+      setTickNowMs(Date.now());
+    }, 1000);
+    return () => window.clearInterval(timer);
+  }, [isReadyStage]);
+
+  const liveSla = calculateSlaMetrics(order, tickNowMs, slaThresholds);
+
+  return (
+    <span
+      className={cn(
+        "rounded-lg border px-2.5 py-1 font-mono text-xs font-bold tracking-wider shadow-2xs",
+        isReadyStage
+          ? "border-emerald-200 bg-emerald-100 text-emerald-800"
+          : getSlaBadgeClass(liveSla.level)
+      )}
+      title={
+        isReadyStage
+          ? "Đơn đã nấu xong"
+          : liveSla.level === "critical"
+            ? `Quá hạn SLA (> ${slaThresholds.criticalMinutes} phút)`
+            : liveSla.level === "warning"
+              ? `Sắp trễ SLA (> ${slaThresholds.warningMinutes} phút)`
+              : "Trong ngưỡng SLA chuẩn"
+      }
+    >
+      {isReadyStage ? "XONG" : liveSla.formattedTimer}
+    </span>
+  );
+}
+
+export const OrderTicketCard = memo(function OrderTicketCard({
   order,
   nowMs,
   tableMap,
@@ -147,25 +194,11 @@ export function OrderTicketCard({
 
           {/* SLA Timer */}
           <div className="flex flex-col items-end">
-            <span
-              className={cn(
-                "rounded-lg border px-2.5 py-1 font-mono text-xs font-bold tracking-wider shadow-2xs",
-                isReadyStage
-                  ? "border-emerald-200 bg-emerald-100 text-emerald-800"
-                  : getSlaBadgeClass(sla.level)
-              )}
-              title={
-                isReadyStage
-                  ? "Đơn đã nấu xong"
-                  : sla.level === "critical"
-                    ? `Quá hạn SLA (> ${slaThresholds.criticalMinutes} phút)`
-                    : sla.level === "warning"
-                      ? `Sắp trễ SLA (> ${slaThresholds.warningMinutes} phút)`
-                      : "Trong ngưỡng SLA chuẩn"
-              }
-            >
-              {isReadyStage ? "XONG" : sla.formattedTimer}
-            </span>
+            <LiveSlaBadge
+              order={order}
+              slaThresholds={slaThresholds}
+              isReadyStage={isReadyStage}
+            />
             <span className="mt-1 text-[10px] font-medium text-slate-500">
               {readyItemsCount}/{activeItems.length} món xong
               {preparingItemsCount > 0
@@ -428,5 +461,5 @@ export function OrderTicketCard({
       </div>
     </article>
   );
-}
+});
 

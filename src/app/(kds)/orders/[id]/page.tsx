@@ -1,10 +1,18 @@
 "use client";
 
+import dynamic from "next/dynamic";
 import Link from "next/link";
 import { useParams } from "next/navigation";
 import { Suspense, useCallback, useEffect, useState } from "react";
 import { useKdsSession } from "@/features/auth/context/KdsSessionProvider";
-import { CancelOrderModal } from "@/features/kitchen/components/CancelOrderModal";
+
+const CancelOrderModal = dynamic(
+  () =>
+    import("@/features/kitchen/components/CancelOrderModal").then(
+      (m) => m.CancelOrderModal
+    ),
+  { ssr: false }
+);
 import {
   advanceOrderItem,
   cancelOrder,
@@ -740,12 +748,14 @@ function OrderDetailPageContent() {
         </div>
       </section>
 
-      <CancelOrderModal
-        order={isCancelModalOpen ? order : null}
-        isBusy={isOrderBusy}
-        onClose={() => setIsCancelModalOpen(false)}
-        onConfirmCancel={handleCancelOrder}
-      />
+      {isCancelModalOpen && order && (
+        <CancelOrderModal
+          order={order}
+          isBusy={isOrderBusy}
+          onClose={() => setIsCancelModalOpen(false)}
+          onConfirmCancel={handleCancelOrder}
+        />
+      )}
     </div>
   );
 }

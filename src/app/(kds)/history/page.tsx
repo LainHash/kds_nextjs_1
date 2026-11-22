@@ -1,10 +1,25 @@
 "use client";
 
+import dynamic from "next/dynamic";
 import Link from "next/link";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useKdsSession } from "@/features/auth/context/KdsSessionProvider";
-import { CancelOrderModal } from "@/features/kitchen/components/CancelOrderModal";
-import { OrderDetailDrawer } from "@/features/kitchen/components/OrderDetailDrawer";
+
+const CancelOrderModal = dynamic(
+  () =>
+    import("@/features/kitchen/components/CancelOrderModal").then(
+      (m) => m.CancelOrderModal
+    ),
+  { ssr: false }
+);
+
+const OrderDetailDrawer = dynamic(
+  () =>
+    import("@/features/kitchen/components/OrderDetailDrawer").then(
+      (m) => m.OrderDetailDrawer
+    ),
+  { ssr: false }
+);
 import {
   advanceOrderItem,
   cancelOrder,
@@ -728,43 +743,43 @@ export default function KitchenHistoryPage() {
         </section>
       )}
 
-      <OrderDetailDrawer
-        order={selectedOrder}
-        tableMap={tableMap}
-        canUpdatePreparation={canUpdatePreparation}
-        canCancelOrders={canCancelOrders}
-        isOrderBusy={
-          selectedOrder ? Boolean(busyOrderIds[selectedOrder.id]) : false
-        }
-        busyItemIds={busyItemIds}
-        onClose={() => setSelectedOrderId(null)}
-        onStartPreparingOrder={(id) =>
-          void startPreparingOrder(id).then(() => syncSingleOrderInHistory(id))
-        }
-        onMarkOrderReady={(id) =>
-          void markOrderReady(id).then(() => syncSingleOrderInHistory(id))
-        }
-        onRequestCancelOrder={(o) => setCancellingOrder(o)}
-        onRecallOrder={(o) => void handleRecall(o)}
-        onAdvanceItem={(orderId, itemId) =>
-          void handleAdvanceItem(orderId, itemId)
-        }
-        onRevertItem={(orderId, itemId) =>
-          void handleRevertItem(orderId, itemId)
-        }
-        onUpdateItemStatus={(orderId, itemId, status) =>
-          void handleUpdateItemStatus(orderId, itemId, status)
-        }
-      />
+      {selectedOrder && (
+        <OrderDetailDrawer
+          order={selectedOrder}
+          tableMap={tableMap}
+          canUpdatePreparation={canUpdatePreparation}
+          canCancelOrders={canCancelOrders}
+          isOrderBusy={Boolean(busyOrderIds[selectedOrder.id])}
+          busyItemIds={busyItemIds}
+          onClose={() => setSelectedOrderId(null)}
+          onStartPreparingOrder={(id) =>
+            void startPreparingOrder(id).then(() => syncSingleOrderInHistory(id))
+          }
+          onMarkOrderReady={(id) =>
+            void markOrderReady(id).then(() => syncSingleOrderInHistory(id))
+          }
+          onRequestCancelOrder={(o) => setCancellingOrder(o)}
+          onRecallOrder={(o) => void handleRecall(o)}
+          onAdvanceItem={(orderId, itemId) =>
+            void handleAdvanceItem(orderId, itemId)
+          }
+          onRevertItem={(orderId, itemId) =>
+            void handleRevertItem(orderId, itemId)
+          }
+          onUpdateItemStatus={(orderId, itemId, status) =>
+            void handleUpdateItemStatus(orderId, itemId, status)
+          }
+        />
+      )}
 
-      <CancelOrderModal
-        order={cancellingOrder}
-        isBusy={
-          cancellingOrder ? Boolean(busyOrderIds[cancellingOrder.id]) : false
-        }
-        onClose={() => setCancellingOrder(null)}
-        onConfirmCancel={handleCancelOrder}
-      />
+      {cancellingOrder && (
+        <CancelOrderModal
+          order={cancellingOrder}
+          isBusy={Boolean(busyOrderIds[cancellingOrder.id])}
+          onClose={() => setCancellingOrder(null)}
+          onConfirmCancel={handleCancelOrder}
+        />
+      )}
     </div>
   );
 }

@@ -1,11 +1,26 @@
 "use client";
 
+import dynamic from "next/dynamic";
 import Link from "next/link";
-import { useEffect, useMemo, useState } from "react";
+import { useDeferredValue, useEffect, useMemo, useState } from "react";
 import { useKdsSession } from "@/features/auth/context/KdsSessionProvider";
-import { CancelOrderModal } from "@/features/kitchen/components/CancelOrderModal";
-import { OrderDetailDrawer } from "@/features/kitchen/components/OrderDetailDrawer";
 import { OrderTicketCard } from "@/features/kitchen/components/OrderTicketCard";
+
+const CancelOrderModal = dynamic(
+  () =>
+    import("@/features/kitchen/components/CancelOrderModal").then(
+      (m) => m.CancelOrderModal
+    ),
+  { ssr: false }
+);
+
+const OrderDetailDrawer = dynamic(
+  () =>
+    import("@/features/kitchen/components/OrderDetailDrawer").then(
+      (m) => m.OrderDetailDrawer
+    ),
+  { ssr: false }
+);
 import { useKitchenQueue } from "@/features/kitchen/hooks/useKitchenQueue";
 import type {
   KdsBoardViewMode,
@@ -41,6 +56,7 @@ export default function KdsHomePage() {
   const [stageFilter, setStageFilter] = useState<KitchenStageFilter>("ALL");
   const [typeFilter, setTypeFilter] = useState<OrderTypeFilter>("ALL");
   const [searchQuery, setSearchQuery] = useState("");
+  const deferredSearchQuery = useDeferredValue(searchQuery);
   const [soundEnabled, setSoundEnabled] = useState(true);
   const [pollIntervalMs, setPollIntervalMs] = useState<number>(5000);
   const [nowMs, setNowMs] = useState<number>(() => Date.now());
@@ -52,7 +68,7 @@ export default function KdsHomePage() {
   useEffect(() => {
     const timer = window.setInterval(() => {
       setNowMs(Date.now());
-    }, 1000);
+    }, 15_000);
     return () => window.clearInterval(timer);
   }, []);
 
@@ -97,7 +113,7 @@ export default function KdsHomePage() {
 
   // Filter by OrderType & Search Keyword first so column counts reflect type/search filters
   const baseFilteredOrders = useMemo(() => {
-    const normalizedSearch = searchQuery.trim().toLowerCase();
+    const normalizedSearch = deferredSearchQuery.trim().toLowerCase();
 
     return orders.filter((order) => {
       if (typeFilter !== "ALL" && order.type !== typeFilter) {
@@ -126,7 +142,7 @@ export default function KdsHomePage() {
 
       return matchesCode || matchesNote || matchesTable || matchesItem;
     });
-  }, [orders, typeFilter, searchQuery, tableMap]);
+  }, [orders, typeFilter, deferredSearchQuery, tableMap]);
 
   const confirmedOrders = useMemo(
     () =>
@@ -779,40 +795,40 @@ export default function KdsHomePage() {
       )}
 
       {/* Slide-over Order Detail Drawer */}
-      <OrderDetailDrawer
-        order={selectedOrder}
-        tableMap={tableMap}
-        canUpdatePreparation={canUpdatePreparation}
-        canCancelOrders={canCancelOrders}
-        isOrderBusy={
-          selectedOrder ? Boolean(busyOrderIds[selectedOrder.id]) : false
-        }
-        busyItemIds={busyItemIds}
-        onClose={() => setSelectedOrderId(null)}
-        onStartPreparingOrder={(id) => void handleStartPreparingOrder(id)}
-        onMarkOrderReady={(id) => void handleMarkOrderReady(id)}
-        onRequestCancelOrder={(o) => setCancellingOrder(o)}
-        onRecallOrder={(o) => void handleRecallOrder(o)}
-        onAdvanceItem={(orderId, itemId) =>
-          void handleAdvanceItem(orderId, itemId)
-        }
-        onRevertItem={(orderId, itemId) =>
-          void handleRevertItem(orderId, itemId)
-        }
-        onUpdateItemStatus={(orderId, itemId, status) =>
-          void handleUpdateItemStatus(orderId, itemId, status)
-        }
-      />
+      {selectedOrder && (
+        <OrderDetailDrawer
+          order={selectedOrder}
+          tableMap={tableMap}
+          canUpdatePreparation={canUpdatePreparation}
+          canCancelOrders={canCancelOrders}
+          isOrderBusy={Boolean(busyOrderIds[selectedOrder.id])}
+          busyItemIds={busyItemIds}
+          onClose={() => setSelectedOrderId(null)}
+          onStartPreparingOrder={(id) => void handleStartPreparingOrder(id)}
+          onMarkOrderReady={(id) => void handleMarkOrderReady(id)}
+          onRequestCancelOrder={(o) => setCancellingOrder(o)}
+          onRecallOrder={(o) => void handleRecallOrder(o)}
+          onAdvanceItem={(orderId, itemId) =>
+            void handleAdvanceItem(orderId, itemId)
+          }
+          onRevertItem={(orderId, itemId) =>
+            void handleRevertItem(orderId, itemId)
+          }
+          onUpdateItemStatus={(orderId, itemId, status) =>
+            void handleUpdateItemStatus(orderId, itemId, status)
+          }
+        />
+      )}
 
       {/* Cancel Order Modal with Waste Warning */}
-      <CancelOrderModal
-        order={cancellingOrder}
-        isBusy={
-          cancellingOrder ? Boolean(busyOrderIds[cancellingOrder.id]) : false
-        }
-        onClose={() => setCancellingOrder(null)}
-        onConfirmCancel={handleCancelOrder}
-      />
+      {cancellingOrder && (
+        <CancelOrderModal
+          order={cancellingOrder}
+          isBusy={Boolean(busyOrderIds[cancellingOrder.id])}
+          onClose={() => setCancellingOrder(null)}
+          onConfirmCancel={handleCancelOrder}
+        />
+      )}
     </div>
   );
 }

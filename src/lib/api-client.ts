@@ -19,6 +19,44 @@ export class ApiError extends Error {
 export interface ApiFetchOptions extends RequestInit {
   skipAuth?: boolean;
   skipRefresh?: boolean;
+  timeoutMs?: number;
+}
+
+const DEFAULT_REQUEST_TIMEOUT_MS = 30_000;
+
+function createRequestSignal(
+  callerSignal?: AbortSignal | null,
+  timeoutMs: number = DEFAULT_REQUEST_TIMEOUT_MS
+): { signal: AbortSignal; cleanup: () => void } {
+  const controller = new AbortController();
+  const timeoutId =
+    timeoutMs > 0
+      ? globalThis.setTimeout(() => {
+          controller.abort(new DOMException("Request timeout", "TimeoutError"));
+        }, timeoutMs)
+      : null;
+
+  const onCallerAbort = () => {
+    controller.abort(callerSignal?.reason);
+  };
+
+  if (callerSignal) {
+    if (callerSignal.aborted) {
+      controller.abort(callerSignal.reason);
+    } else {
+      callerSignal.addEventListener("abort", onCallerAbort, { once: true });
+    }
+  }
+
+  return {
+    signal: controller.signal,
+    cleanup: () => {
+      if (timeoutId !== null) {
+        globalThis.clearTimeout(timeoutId);
+      }
+      callerSignal?.removeEventListener("abort", onCallerAbort);
+    },
+  };
 }
 
 let refreshPromise: Promise<string | null> | null = null;
@@ -140,64 +178,77 @@ export async function apiFetch<T>(
   path: string,
   options?: ApiFetchOptions
 ): Promise<T> {
-  const { skipAuth = false, skipRefresh = false, ...init } = options ?? {};
+  const {
+    skipAuth = false,
+    skipRefresh = false,
+    timeoutMs = DEFAULT_REQUEST_TIMEOUT_MS,
+    signal: callerSignal,
+    ...init
+  } = options ?? {};
 
-  const execute = async (tokenOverride?: string | null): Promise<Response> => {
-    const token = skipAuth
-      ? null
-      : tokenOverride !== undefined
-        ? tokenOverride
-        : authStorage.getAccessToken();
+  const { signal, cleanup } = createRequestSignal(callerSignal, timeoutMs);
 
-    const headers = new Headers(init.headers);
-    if (!headers.has("Content-Type") && !(init.body instanceof FormData)) {
-      headers.set("Content-Type", "application/json");
+  try {
+    const execute = async (tokenOverride?: string | null): Promise<Response> => {
+      const token = skipAuth
+        ? null
+        : tokenOverride !== undefined
+          ? tokenOverride
+          : authStorage.getAccessToken();
+
+      const headers = new Headers(init.headers);
+      if (!headers.has("Content-Type") && !(init.body instanceof FormData)) {
+        headers.set("Content-Type", "application/json");
+      }
+      if (token && !headers.has("Authorization")) {
+        headers.set("Authorization", `Bearer ${token}`);
+      }
+
+      return fetch(buildUrl(path), {
+        ...init,
+        signal,
+        credentials: init.credentials ?? "include",
+        headers,
+      });
+    };
+
+    let response = await execute();
+
+    if (response.status === 401 && !skipAuth && !skipRefresh) {
+      const newToken = await refreshAccessToken();
+      if (newToken) {
+        response = await execute(newToken);
+      } else {
+        notifyAuthExpired();
+      }
     }
-    if (token && !headers.has("Authorization")) {
-      headers.set("Authorization", `Bearer ${token}`);
+
+    const payload = await parseResponseBody(response);
+
+    if (!response.ok) {
+      throw new ApiError(
+        extractErrorMessage(response, payload),
+        response.status,
+        payload
+      );
     }
 
-    return fetch(buildUrl(path), {
-      ...init,
-      credentials: init.credentials ?? "include",
-      headers,
-    });
-  };
-
-  let response = await execute();
-
-  if (response.status === 401 && !skipAuth && !skipRefresh) {
-    const newToken = await refreshAccessToken();
-    if (newToken) {
-      response = await execute(newToken);
-    } else {
-      notifyAuthExpired();
+    if (
+      payload &&
+      typeof payload === "object" &&
+      "isSucceed" in payload &&
+      (payload as { isSucceed?: boolean }).isSucceed === false
+    ) {
+      const result = payload as ApiResult<unknown>;
+      throw new ApiError(
+        result.message || "Yêu cầu không thành công.",
+        result.statusCode || response.status,
+        payload
+      );
     }
+
+    return payload as T;
+  } finally {
+    cleanup();
   }
-
-  const payload = await parseResponseBody(response);
-
-  if (!response.ok) {
-    throw new ApiError(
-      extractErrorMessage(response, payload),
-      response.status,
-      payload
-    );
-  }
-
-  if (
-    payload &&
-    typeof payload === "object" &&
-    "isSucceed" in payload &&
-    (payload as { isSucceed?: boolean }).isSucceed === false
-  ) {
-    const result = payload as ApiResult<unknown>;
-    throw new ApiError(
-      result.message || "Yêu cầu không thành công.",
-      result.statusCode || response.status,
-      payload
-    );
-  }
-
-  return payload as T;
 }
