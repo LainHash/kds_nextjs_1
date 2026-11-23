@@ -1,7 +1,13 @@
 "use client";
 
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ApiError } from "@/lib/api-client";
+import {
+  subscribeBranchOrdersRealtime,
+  type OrderRealtimeEvent,
+  type RealtimeTransportState,
+} from "@/lib/order-realtime";
 import {
   advanceOrderItem,
   cancelOrder,
@@ -37,11 +43,8 @@ export interface UseKitchenQueueOptions {
   enabled?: boolean;
 }
 
-interface BranchQueueState {
-  branchId: string | null;
-  orders: OrderDetailResponse[];
-  lastSyncedAt: Date | null;
-  errorMessage: string | null;
+function getKitchenQueueQueryKey(branchId: string | null) {
+  return ["kds", "kitchen-queue", branchId] as const;
 }
 
 export function useKitchenQueue({
@@ -51,16 +54,10 @@ export function useKitchenQueue({
   enabled = true,
 }: UseKitchenQueueOptions) {
   const targetBranchId = branchId ?? null;
+  const queryClient = useQueryClient();
 
-  const [queueState, setQueueState] = useState<BranchQueueState>({
-    branchId: null,
-    orders: [],
-    lastSyncedAt: null,
-    errorMessage: null,
-  });
-  const [isRefreshing, setIsRefreshing] = useState<boolean>(false);
-  const [connectionState, setConnectionState] =
-    useState<KdsConnectionState>("online");
+  const [realtimeState, setRealtimeState] =
+    useState<RealtimeTransportState>("connecting");
   const [feedback, setFeedback] = useState<KdsActionFeedback | null>(null);
   const [busyOrderIds, setBusyOrderIds] = useState<Record<string, boolean>>({});
   const [busyItemIds, setBusyItemIds] = useState<Record<string, boolean>>({});
@@ -84,128 +81,83 @@ export function useKitchenQueue({
     setFeedback(null);
   }, []);
 
-  const performFetch = useCallback(async (branchToLoad: string) => {
-    try {
-      const res = await getKitchenQueue({
-        branchId: branchToLoad,
-        statuses: LIVE_BOARD_ORDER_STATUSES,
-        page: 1,
-        pageSize: 100,
-        sortField: "created_at",
-        isAscending: true,
-      });
+  const queryKey = useMemo(
+    () => getKitchenQueueQueryKey(targetBranchId),
+    [targetBranchId]
+  );
 
-      const nextOrders = res.data ?? [];
+  const fetchQueue = useCallback(async (branchToLoad: string) => {
+    const res = await getKitchenQueue({
+      branchId: branchToLoad,
+      statuses: LIVE_BOARD_ORDER_STATUSES,
+      page: 1,
+      pageSize: 100,
+      sortField: "created_at",
+      isAscending: true,
+    });
 
-      if (loadedBranchRef.current === branchToLoad) {
-        const hasNewConfirmedOrder = nextOrders.some(
-          (o) =>
-            o.status === "Confirmed" && !knownOrderIdsRef.current.has(o.id)
-        );
-        if (hasNewConfirmedOrder && soundEnabledRef.current) {
-          playNewOrderChime();
-        }
+    const nextOrders = res.data ?? [];
+
+    if (loadedBranchRef.current === branchToLoad) {
+      const hasNewConfirmedOrder = nextOrders.some(
+        (o) => o.status === "Confirmed" && !knownOrderIdsRef.current.has(o.id)
+      );
+      if (hasNewConfirmedOrder && soundEnabledRef.current) {
+        playNewOrderChime();
       }
-
-      knownOrderIdsRef.current = new Set(nextOrders.map((o) => o.id));
-      loadedBranchRef.current = branchToLoad;
-
-      setQueueState({
-        branchId: branchToLoad,
-        orders: nextOrders,
-        lastSyncedAt: new Date(),
-        errorMessage: null,
-      });
-      setConnectionState("online");
-    } catch (error) {
-      loadedBranchRef.current = branchToLoad;
-      setConnectionState("reconnecting");
-      setQueueState((prev) => ({
-        branchId: branchToLoad,
-        orders: prev.branchId === branchToLoad ? prev.orders : [],
-        lastSyncedAt: prev.branchId === branchToLoad ? prev.lastSyncedAt : null,
-        errorMessage:
-          error instanceof ApiError
-            ? error.message
-            : "Mất kết nối tạm thời tới máy chủ KDS. Đang tự động thử lại...",
-      }));
-    } finally {
-      setIsRefreshing(false);
     }
+
+    knownOrderIdsRef.current = new Set(nextOrders.map((o) => o.id));
+    loadedBranchRef.current = branchToLoad;
+    return nextOrders;
   }, []);
 
-  const refreshNow = useCallback(async () => {
-    if (!targetBranchId || !enabled) return;
-    setIsRefreshing(true);
-    setConnectionState((prev) =>
-      prev === "reconnecting" ? "reconnecting" : "syncing"
-    );
-    await performFetch(targetBranchId);
-  }, [targetBranchId, enabled, performFetch]);
+  // When SignalR is connected, relax fallback polling to 30s; when disconnected, use pollIntervalMs
+  const effectiveRefetchInterval = useMemo(() => {
+    if (!targetBranchId || !enabled || pollIntervalMs <= 0) return false as const;
+    return realtimeState === "connected"
+      ? Math.max(pollIntervalMs, 30_000)
+      : pollIntervalMs;
+  }, [targetBranchId, enabled, pollIntervalMs, realtimeState]);
 
-  useEffect(() => {
-    if (!targetBranchId || !enabled) return;
-
-    let cancelled = false;
-
-    const runInitialAndPoll = async () => {
-      if (cancelled) return;
-      await performFetch(targetBranchId);
-    };
-
-    void runInitialAndPoll();
-
-    if (pollIntervalMs <= 0) {
-      return () => {
-        cancelled = true;
-      };
-    }
-
-    const timer = window.setInterval(() => {
-      if (!cancelled && document.visibilityState === "visible") {
-        setIsRefreshing(true);
-        void performFetch(targetBranchId);
-      }
-    }, pollIntervalMs);
-
-    const handleVisibilityChange = () => {
-      if (!cancelled && document.visibilityState === "visible") {
-        setIsRefreshing(true);
-        void performFetch(targetBranchId);
-      }
-    };
-
-    document.addEventListener("visibilitychange", handleVisibilityChange);
-    return () => {
-      cancelled = true;
-      window.clearInterval(timer);
-      document.removeEventListener("visibilitychange", handleVisibilityChange);
-    };
-  }, [targetBranchId, enabled, pollIntervalMs, performFetch]);
+  const queueQuery = useQuery<OrderDetailResponse[], ApiError>({
+    queryKey,
+    queryFn: () => fetchQueue(targetBranchId!),
+    enabled: Boolean(targetBranchId && enabled),
+    staleTime: 10_000,
+    refetchInterval: effectiveRefetchInterval,
+    refetchIntervalInBackground: false,
+  });
 
   const applyUpdatedOrder = useCallback(
     (updated: OrderDetailResponse) => {
-      setQueueState((prev) => {
-        if (prev.branchId !== targetBranchId) return prev;
+      if (!targetBranchId) return;
+      queryClient.setQueryData<OrderDetailResponse[]>(queryKey, (prev = []) => {
         const isStillOnBoard = LIVE_BOARD_ORDER_STATUSES.includes(
           updated.status
         );
-        const nextOrders = !isStillOnBoard
-          ? prev.orders.filter((item) => item.id !== updated.id)
-          : prev.orders.some((item) => item.id === updated.id)
-            ? prev.orders.map((item) =>
-                item.id === updated.id ? updated : item
-              )
-            : [...prev.orders, updated];
+        if (!isStillOnBoard) {
+          knownOrderIdsRef.current.delete(updated.id);
+          return prev.filter((item) => item.id !== updated.id);
+        }
 
-        return {
-          ...prev,
-          orders: nextOrders,
-          lastSyncedAt: new Date(),
-        };
+        const existed = prev.some((item) => item.id === updated.id);
+        if (
+          !existed &&
+          updated.status === "Confirmed" &&
+          !knownOrderIdsRef.current.has(updated.id) &&
+          soundEnabledRef.current
+        ) {
+          playNewOrderChime();
+        }
+        knownOrderIdsRef.current.add(updated.id);
+
+        return existed
+          ? prev.map((item) => (item.id === updated.id ? updated : item))
+          : [...prev, updated];
       });
     },
-    [targetBranchId]
+    [queryClient, queryKey, targetBranchId]
   );
 
   const applyItemPreparationPatch = useCallback(
@@ -215,41 +167,38 @@ export function useKitchenQueue({
       patch?: OrderPreparationStatusResponse | null,
       fallbackStatus?: PreparationStatus
     ) => {
-      setQueueState((prev) => {
-        if (prev.branchId !== targetBranchId) return prev;
-        return {
-          ...prev,
-          orders: prev.orders.map((order) => {
-            if (order.id !== orderId) return order;
-            const nextOrderStatus = patch?.orderStatus ?? order.status;
-            const nextItems = order.orderItems.map((item) => {
-              if (item.id !== orderItemId) return item;
-              return {
-                ...item,
-                preparationStatus:
-                  patch?.currentStatus ??
-                  fallbackStatus ??
-                  item.preparationStatus,
-                preparationStartedAt:
-                  patch?.startedAt !== undefined
-                    ? patch.startedAt
-                    : item.preparationStartedAt,
-                preparationCompletedAt:
-                  patch?.completedAt !== undefined
-                    ? patch.completedAt
-                    : item.preparationCompletedAt,
-              };
-            });
+      if (!targetBranchId) return;
+      queryClient.setQueryData<OrderDetailResponse[]>(queryKey, (prev = []) =>
+        prev.map((order) => {
+          if (order.id !== orderId) return order;
+          const nextOrderStatus = patch?.orderStatus ?? order.status;
+          const nextItems = order.orderItems.map((item) => {
+            if (item.id !== orderItemId) return item;
             return {
-              ...order,
-              status: nextOrderStatus,
-              orderItems: nextItems,
+              ...item,
+              preparationStatus:
+                patch?.currentStatus ??
+                fallbackStatus ??
+                item.preparationStatus,
+              preparationStartedAt:
+                patch?.startedAt !== undefined
+                  ? patch.startedAt
+                  : item.preparationStartedAt,
+              preparationCompletedAt:
+                patch?.completedAt !== undefined
+                  ? patch.completedAt
+                  : item.preparationCompletedAt,
             };
-          }),
-        };
-      });
+          });
+          return {
+            ...order,
+            status: nextOrderStatus,
+            orderItems: nextItems,
+          };
+        })
+      );
     },
-    [targetBranchId]
+    [queryClient, queryKey, targetBranchId]
   );
 
   const syncSingleOrder = useCallback(
@@ -260,17 +209,79 @@ export function useKitchenQueue({
           applyUpdatedOrder(detail.data);
         }
       } catch {
-        if (targetBranchId) {
-          await performFetch(targetBranchId);
-        }
+        await queryClient.invalidateQueries({ queryKey });
       }
     },
-    [applyUpdatedOrder, performFetch, targetBranchId]
+    [applyUpdatedOrder, queryClient, queryKey]
   );
+
+  // SignalR real-time subscription with batched UI/cache updates
+  useEffect(() => {
+    if (!targetBranchId || !enabled) return;
+
+    const handleBatchedEvents = async (events: OrderRealtimeEvent[]) => {
+      const uniqueOrderIds = Array.from(
+        new Set(
+          events
+            .map((e) => e.orderPublicId)
+            .filter((id): id is string => Boolean(id))
+        )
+      );
+
+      if (
+        events.some((e) => e.eventType === "Reconnected") ||
+        uniqueOrderIds.length === 0 ||
+        uniqueOrderIds.length > 3
+      ) {
+        await queryClient.invalidateQueries({ queryKey });
+        return;
+      }
+
+      await Promise.all(uniqueOrderIds.map((id) => syncSingleOrder(id)));
+    };
+
+    const unsubscribe = subscribeBranchOrdersRealtime({
+      branchId: targetBranchId,
+      onBatchedEvents: (events) => {
+        void handleBatchedEvents(events);
+      },
+      onStateChange: (state) => {
+        setRealtimeState(state);
+      },
+    });
+
+    return unsubscribe;
+  }, [targetBranchId, enabled, queryClient, queryKey, syncSingleOrder]);
+
+  const refreshNow = useCallback(async () => {
+    if (!targetBranchId || !enabled) return;
+    await queryClient.invalidateQueries({ queryKey });
+  }, [targetBranchId, enabled, queryClient, queryKey]);
 
   const handleStartPreparingOrder = useCallback(
     async (orderId: string) => {
       setBusyOrderIds((prev) => ({ ...prev, [orderId]: true }));
+      const snapshot =
+        queryClient.getQueryData<OrderDetailResponse[]>(queryKey);
+
+      // Optimistic update: transition order & pending items to Preparing immediately
+      queryClient.setQueryData<OrderDetailResponse[]>(queryKey, (prev = []) =>
+        prev.map((order) =>
+          order.id !== orderId
+            ? order
+            : {
+                ...order,
+                status: "Preparing",
+                orderItems: order.orderItems.map((item) =>
+                  item.preparationStatus === "Pending" ||
+                  !item.preparationStatus
+                    ? { ...item, preparationStatus: "Preparing" }
+                    : item
+                ),
+              }
+        )
+      );
+
       try {
         const res = await startPreparingOrder(orderId);
         if (res.data) {
@@ -283,6 +294,9 @@ export function useKitchenQueue({
           `Đã bắt đầu chế biến đơn #${res.data?.orderCode ?? ""}.`
         );
       } catch (error) {
+        if (snapshot) {
+          queryClient.setQueryData(queryKey, snapshot);
+        }
         showFeedback(
           "error",
           error instanceof ApiError
@@ -293,12 +307,37 @@ export function useKitchenQueue({
         setBusyOrderIds((prev) => ({ ...prev, [orderId]: false }));
       }
     },
-    [applyUpdatedOrder, showFeedback, syncSingleOrder]
+    [applyUpdatedOrder, queryClient, queryKey, showFeedback, syncSingleOrder]
   );
 
   const handleMarkOrderReady = useCallback(
     async (orderId: string) => {
       setBusyOrderIds((prev) => ({ ...prev, [orderId]: true }));
+      const snapshot =
+        queryClient.getQueryData<OrderDetailResponse[]>(queryKey);
+
+      // Optimistic update: move order to Ready stage based on OrderType
+      queryClient.setQueryData<OrderDetailResponse[]>(queryKey, (prev = []) =>
+        prev.map((order) => {
+          if (order.id !== orderId) return order;
+          const nextStatus =
+            order.type === "TakeAway"
+              ? "ReadyForPickup"
+              : order.type === "Delivery"
+                ? "ReadyForDelivery"
+                : "Served";
+          return {
+            ...order,
+            status: nextStatus,
+            orderItems: order.orderItems.map((item) =>
+              item.preparationStatus !== "Cancelled"
+                ? { ...item, preparationStatus: "Ready" }
+                : item
+            ),
+          };
+        })
+      );
+
       try {
         const res = await markOrderReady(orderId);
         if (res.data) {
@@ -311,6 +350,9 @@ export function useKitchenQueue({
           `Đơn #${res.data?.orderCode ?? ""} đã hoàn tất chế biến (Ready).`
         );
       } catch (error) {
+        if (snapshot) {
+          queryClient.setQueryData(queryKey, snapshot);
+        }
         showFeedback(
           "error",
           error instanceof ApiError
@@ -321,21 +363,23 @@ export function useKitchenQueue({
         setBusyOrderIds((prev) => ({ ...prev, [orderId]: false }));
       }
     },
-    [applyUpdatedOrder, showFeedback, syncSingleOrder]
+    [applyUpdatedOrder, queryClient, queryKey, showFeedback, syncSingleOrder]
   );
 
   const handleCancelOrder = useCallback(
     async (orderId: string, reason?: string): Promise<boolean> => {
       setBusyOrderIds((prev) => ({ ...prev, [orderId]: true }));
+      const snapshot =
+        queryClient.getQueryData<OrderDetailResponse[]>(queryKey);
+
+      queryClient.setQueryData<OrderDetailResponse[]>(queryKey, (prev = []) =>
+        prev.filter((item) => item.id !== orderId)
+      );
+
       try {
         const res = await cancelOrder(orderId, reason);
         if (res.data) {
           applyUpdatedOrder(res.data);
-        } else {
-          setQueueState((prev) => ({
-            ...prev,
-            orders: prev.orders.filter((item) => item.id !== orderId),
-          }));
         }
         showFeedback(
           "success",
@@ -343,6 +387,9 @@ export function useKitchenQueue({
         );
         return true;
       } catch (error) {
+        if (snapshot) {
+          queryClient.setQueryData(queryKey, snapshot);
+        }
         showFeedback(
           "error",
           error instanceof ApiError
@@ -354,12 +401,21 @@ export function useKitchenQueue({
         setBusyOrderIds((prev) => ({ ...prev, [orderId]: false }));
       }
     },
-    [applyUpdatedOrder, showFeedback]
+    [applyUpdatedOrder, queryClient, queryKey, showFeedback]
   );
 
   const handleRecallOrder = useCallback(
     async (order: OrderDetailResponse) => {
       setBusyOrderIds((prev) => ({ ...prev, [order.id]: true }));
+      const snapshot =
+        queryClient.getQueryData<OrderDetailResponse[]>(queryKey);
+
+      queryClient.setQueryData<OrderDetailResponse[]>(queryKey, (prev = []) =>
+        prev.map((o) =>
+          o.id === order.id ? { ...o, status: "Preparing" } : o
+        )
+      );
+
       try {
         await recallOrderToKitchen(order);
         await syncSingleOrder(order.id);
@@ -368,6 +424,9 @@ export function useKitchenQueue({
           `Đã hoàn tác (Recall) đơn #${order.orderCode} quay lại trạng thái Đang chế biến.`
         );
       } catch (error) {
+        if (snapshot) {
+          queryClient.setQueryData(queryKey, snapshot);
+        }
         showFeedback(
           "error",
           error instanceof ApiError
@@ -378,12 +437,29 @@ export function useKitchenQueue({
         setBusyOrderIds((prev) => ({ ...prev, [order.id]: false }));
       }
     },
-    [showFeedback, syncSingleOrder]
+    [queryClient, queryKey, showFeedback, syncSingleOrder]
   );
 
   const handleAdvanceItem = useCallback(
     async (orderId: string, orderItemId: string) => {
       setBusyItemIds((prev) => ({ ...prev, [orderItemId]: true }));
+      const snapshot =
+        queryClient.getQueryData<OrderDetailResponse[]>(queryKey);
+
+      // Optimistic step advance
+      const currentOrder = snapshot?.find((o) => o.id === orderId);
+      const currentItem = currentOrder?.orderItems.find(
+        (i) => i.id === orderItemId
+      );
+      if (currentItem) {
+        const nextStatus: PreparationStatus =
+          currentItem.preparationStatus === "Pending" ||
+          !currentItem.preparationStatus
+            ? "Preparing"
+            : "Ready";
+        applyItemPreparationPatch(orderId, orderItemId, null, nextStatus);
+      }
+
       try {
         const res = await advanceOrderItem(orderItemId);
         if (res.data) {
@@ -391,6 +467,9 @@ export function useKitchenQueue({
         }
         await syncSingleOrder(orderId);
       } catch (error) {
+        if (snapshot) {
+          queryClient.setQueryData(queryKey, snapshot);
+        }
         showFeedback(
           "error",
           error instanceof ApiError
@@ -401,12 +480,31 @@ export function useKitchenQueue({
         setBusyItemIds((prev) => ({ ...prev, [orderItemId]: false }));
       }
     },
-    [applyItemPreparationPatch, showFeedback, syncSingleOrder]
+    [
+      applyItemPreparationPatch,
+      queryClient,
+      queryKey,
+      showFeedback,
+      syncSingleOrder,
+    ]
   );
 
   const handleRevertItem = useCallback(
     async (orderId: string, orderItemId: string) => {
       setBusyItemIds((prev) => ({ ...prev, [orderItemId]: true }));
+      const snapshot =
+        queryClient.getQueryData<OrderDetailResponse[]>(queryKey);
+
+      const currentOrder = snapshot?.find((o) => o.id === orderId);
+      const currentItem = currentOrder?.orderItems.find(
+        (i) => i.id === orderItemId
+      );
+      if (currentItem) {
+        const prevStatus: PreparationStatus =
+          currentItem.preparationStatus === "Ready" ? "Preparing" : "Pending";
+        applyItemPreparationPatch(orderId, orderItemId, null, prevStatus);
+      }
+
       try {
         const res = await revertOrderItem(orderItemId);
         if (res.data) {
@@ -414,6 +512,9 @@ export function useKitchenQueue({
         }
         await syncSingleOrder(orderId);
       } catch (error) {
+        if (snapshot) {
+          queryClient.setQueryData(queryKey, snapshot);
+        }
         showFeedback(
           "error",
           error instanceof ApiError
@@ -424,7 +525,13 @@ export function useKitchenQueue({
         setBusyItemIds((prev) => ({ ...prev, [orderItemId]: false }));
       }
     },
-    [applyItemPreparationPatch, showFeedback, syncSingleOrder]
+    [
+      applyItemPreparationPatch,
+      queryClient,
+      queryKey,
+      showFeedback,
+      syncSingleOrder,
+    ]
   );
 
   const handleUpdateItemStatus = useCallback(
@@ -434,6 +541,11 @@ export function useKitchenQueue({
       targetStatus: PreparationStatus
     ) => {
       setBusyItemIds((prev) => ({ ...prev, [orderItemId]: true }));
+      const snapshot =
+        queryClient.getQueryData<OrderDetailResponse[]>(queryKey);
+
+      applyItemPreparationPatch(orderId, orderItemId, null, targetStatus);
+
       try {
         const res = await updateOrderItemStatus(orderItemId, targetStatus);
         if (res.data) {
@@ -446,6 +558,9 @@ export function useKitchenQueue({
         }
         await syncSingleOrder(orderId);
       } catch (error) {
+        if (snapshot) {
+          queryClient.setQueryData(queryKey, snapshot);
+        }
         showFeedback(
           "error",
           error instanceof ApiError
@@ -456,35 +571,42 @@ export function useKitchenQueue({
         setBusyItemIds((prev) => ({ ...prev, [orderItemId]: false }));
       }
     },
-    [applyItemPreparationPatch, showFeedback, syncSingleOrder]
+    [
+      applyItemPreparationPatch,
+      queryClient,
+      queryKey,
+      showFeedback,
+      syncSingleOrder,
+    ]
   );
 
   const orders = useMemo(
-    () =>
-      targetBranchId && queueState.branchId === targetBranchId
-        ? queueState.orders
-        : [],
-    [targetBranchId, queueState]
+    () => (targetBranchId && enabled ? (queueQuery.data ?? []) : []),
+    [targetBranchId, enabled, queueQuery.data]
   );
 
-  const isLoading = Boolean(
-    targetBranchId && enabled && queueState.branchId !== targetBranchId
-  );
+  const connectionState: KdsConnectionState = queueQuery.isError
+    ? "reconnecting"
+    : queueQuery.isFetching
+      ? "syncing"
+      : realtimeState === "reconnecting"
+        ? "reconnecting"
+        : "online";
 
-  const lastSyncedAt =
-    targetBranchId && queueState.branchId === targetBranchId
-      ? queueState.lastSyncedAt
-      : null;
+  const lastSyncedAt = queueQuery.dataUpdatedAt
+    ? new Date(queueQuery.dataUpdatedAt)
+    : null;
 
-  const errorMessage =
-    targetBranchId && queueState.branchId === targetBranchId
-      ? queueState.errorMessage
-      : null;
+  const errorMessage = queueQuery.error
+    ? queueQuery.error instanceof ApiError
+      ? queueQuery.error.message
+      : "Mất kết nối tạm thời tới máy chủ KDS. Đang tự động thử lại..."
+    : null;
 
   return {
     orders,
-    isLoading,
-    isRefreshing,
+    isLoading: queueQuery.isLoading,
+    isRefreshing: queueQuery.isFetching && !queueQuery.isLoading,
     connectionState,
     lastSyncedAt,
     errorMessage,
