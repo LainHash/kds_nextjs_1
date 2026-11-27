@@ -2,6 +2,8 @@ import { apiFetch, buildQueryString } from "@/lib/api-client";
 import { API_ENDPOINTS } from "@/lib/constants";
 import type { ApiResult, PaginationParams, PaginationResult } from "@/types/api";
 import type {
+  AdministrativeDivisionQueryParams,
+  AdministrativeDivisionResponse,
   AreaQueryParams,
   AreaResponse,
   BranchResponse,
@@ -34,6 +36,20 @@ export async function getBranchById(
 ): Promise<ApiResult<BranchResponse>> {
   return apiFetch<ApiResult<BranchResponse>>(
     API_ENDPOINTS.territory.branchById(branchId),
+    { skipAuth: true }
+  );
+}
+
+export async function getAdministrativeDivisions(
+  params?: AdministrativeDivisionQueryParams
+): Promise<PaginationResult<AdministrativeDivisionResponse>> {
+  const query = buildQueryString({
+    ...toPaginationQuery(params),
+    level: params?.level,
+    parentId: params?.parentId,
+  });
+  return apiFetch<PaginationResult<AdministrativeDivisionResponse>>(
+    `${API_ENDPOINTS.territory.administrativeDivisions}${query}`,
     { skipAuth: true }
   );
 }

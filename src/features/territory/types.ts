@@ -49,6 +49,20 @@ export interface RestaurantTableQueryParams extends PaginationParams {
   areaId?: string;
 }
 
+export interface AdministrativeDivisionResponse {
+  id: string;
+  name: string;
+  type: string;
+  level: number;
+  parentId?: string | null;
+  parentName?: string | null;
+}
+
+export interface AdministrativeDivisionQueryParams extends PaginationParams {
+  level?: number;
+  parentId?: string;
+}
+
 export interface TableLookupEntry {
   id: string;
   tableNumber: string;

@@ -8,6 +8,8 @@ import {
   updateMyProfile,
 } from "@/features/auth/services/auth.service";
 import type { UserDetailResponse } from "@/features/auth/types";
+import { getAdministrativeDivisions } from "@/features/territory/services/territory.service";
+import type { AdministrativeDivisionResponse } from "@/features/territory/types";
 import { ApiError } from "@/lib/api-client";
 import { cn } from "@/lib/utils";
 
@@ -70,9 +72,15 @@ export default function KdsAccountPage() {
   const [emergencyContactPhone, setEmergencyContactPhone] = useState("");
   const [street, setStreet] = useState("");
   const [ward, setWard] = useState("");
-  const [district, setDistrict] = useState("");
   const [province, setProvince] = useState("");
   const [country, setCountry] = useState("Vietnam");
+  const [provinces, setProvinces] = useState<AdministrativeDivisionResponse[]>([]);
+  const [wards, setWards] = useState<AdministrativeDivisionResponse[]>([]);
+  const [selectedProvinceId, setSelectedProvinceId] = useState("");
+  const [selectedWardId, setSelectedWardId] = useState("");
+  const [savedDivisionId, setSavedDivisionId] = useState("");
+  const [isLoadingDivisions, setIsLoadingDivisions] = useState(true);
+  const [isLoadingWards, setIsLoadingWards] = useState(false);
 
   const [oldPassword, setOldPassword] = useState("");
   const [newPassword, setNewPassword] = useState("");
@@ -82,12 +90,32 @@ export default function KdsAccountPage() {
     let cancelled = false;
     const loadMe = async () => {
       setIsLoadingProfile(true);
+      setIsLoadingDivisions(true);
       try {
-        const res = await getCurrentUser();
+        const [userRes, provincesRes] = await Promise.all([
+          getCurrentUser(),
+          getAdministrativeDivisions({ level: 1, page: 1, pageSize: 200 }).catch(
+            () => null
+          ),
+        ]);
         if (cancelled) return;
-        setAccountDetail(res.data ?? null);
-        const profile = res.data?.personalProfile;
+
+        const seenProvinces = new Set<string>();
+        const uniqueProvinces = (provincesRes?.data ?? []).filter((item) => {
+          const key = item.name.trim().toLowerCase();
+          if (!key || seenProvinces.has(key)) return false;
+          seenProvinces.add(key);
+          return true;
+        });
+        setProvinces(uniqueProvinces);
+
+        setAccountDetail(userRes.data ?? null);
+        const profile = userRes.data?.personalProfile;
         if (profile) {
+          const savedProv = profile.address?.province ?? "";
+          const savedWardName = profile.address?.ward ?? "";
+          const savedDiv = profile.address?.administrativeDivisionPublicId ?? "";
+
           setFirstName(profile.firstName ?? "");
           setLastName(profile.lastName ?? "");
           setDateOfBirth((profile.dateOfBirth ?? "1995-01-01").slice(0, 10));
@@ -97,10 +125,19 @@ export default function KdsAccountPage() {
           setEmergencyContactName(profile.emergencyContactName ?? "");
           setEmergencyContactPhone(profile.emergencyContactPhone ?? "");
           setStreet(profile.address?.street ?? "");
-          setWard(profile.address?.ward ?? "");
-          setDistrict(profile.address?.district ?? "");
-          setProvince(profile.address?.province ?? "");
+          setWard(savedWardName);
+          setProvince(savedProv);
           setCountry(profile.address?.country ?? "Vietnam");
+          setSavedDivisionId(savedDiv);
+
+          const matchedProvince = uniqueProvinces.find(
+            (item) =>
+              (savedDiv && item.id === savedDiv) ||
+              item.name.trim().toLowerCase() === savedProv.trim().toLowerCase()
+          );
+          if (matchedProvince) {
+            setSelectedProvinceId(matchedProvince.id);
+          }
         }
       } catch (error) {
         if (!cancelled) {
@@ -113,6 +150,7 @@ export default function KdsAccountPage() {
       } finally {
         if (!cancelled) {
           setIsLoadingProfile(false);
+          setIsLoadingDivisions(false);
         }
       }
     };
@@ -122,6 +160,61 @@ export default function KdsAccountPage() {
       cancelled = true;
     };
   }, []);
+
+  useEffect(() => {
+    if (!selectedProvinceId) {
+      return;
+    }
+
+    let cancelled = false;
+    const loadWards = async () => {
+      setIsLoadingWards(true);
+      try {
+        const res = await getAdministrativeDivisions({
+          level: 2,
+          parentId: selectedProvinceId,
+          page: 1,
+          pageSize: 200,
+        });
+        if (cancelled) return;
+        const seenWards = new Set<string>();
+        const uniqueWards = (res.data ?? []).filter((item) => {
+          const key = item.name.trim().toLowerCase();
+          if (!key || seenWards.has(key)) return false;
+          seenWards.add(key);
+          return true;
+        });
+        setWards(uniqueWards);
+
+        setSelectedWardId((current) => {
+          if (current && uniqueWards.some((w) => w.id === current)) {
+            return current;
+          }
+          const matched = uniqueWards.find(
+            (w) =>
+              (savedDivisionId && w.id === savedDivisionId) ||
+              (ward && w.name.trim().toLowerCase() === ward.trim().toLowerCase())
+          );
+          return matched?.id ?? "";
+        });
+      } catch {
+        if (!cancelled) {
+          setWards([]);
+        }
+      } finally {
+        if (!cancelled) {
+          setIsLoadingWards(false);
+        }
+      }
+    };
+
+    void loadWards();
+    return () => {
+      cancelled = true;
+    };
+  }, [selectedProvinceId, savedDivisionId, ward]);
+
+  const visibleWards = selectedProvinceId ? wards : [];
 
   const handleSaveProfile = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -134,10 +227,11 @@ export default function KdsAccountPage() {
       !phone.trim() ||
       !citizenCardId.trim() ||
       !street.trim() ||
-      !province.trim()
+      !province.trim() ||
+      (visibleWards.length > 0 && !ward.trim())
     ) {
       setErrorMessage(
-        "Vui lòng nhập đầy đủ họ tên, số điện thoại, CCCD, địa chỉ đường và tỉnh/thành phố."
+        "Vui lòng nhập đầy đủ họ tên, số điện thoại, CCCD, địa chỉ đường, Tỉnh/Thành phố và Phường/Xã."
       );
       return;
     }
@@ -146,6 +240,16 @@ export default function KdsAccountPage() {
       setErrorMessage("Số điện thoại phải gồm 10 đến 15 chữ số.");
       return;
     }
+
+    const cleanCountry = country.trim() || "Vietnam";
+    const fullAddress = [
+      street.trim(),
+      ward.trim() || null,
+      province.trim(),
+      cleanCountry === "Vietnam" ? "Việt Nam" : cleanCountry,
+    ]
+      .filter(Boolean)
+      .join(", ");
 
     setIsSavingProfile(true);
     try {
@@ -162,9 +266,12 @@ export default function KdsAccountPage() {
         address: {
           street: street.trim(),
           ward: ward.trim() || null,
-          district: district.trim() || null,
+          district: null,
           province: province.trim(),
-          country: country.trim() || "Vietnam",
+          country: cleanCountry,
+          fullAddress,
+          administrativeDivisionPublicId:
+            selectedWardId || selectedProvinceId || null,
         },
       });
       setSuccessMessage("Đã cập nhật hồ sơ cá nhân thành công.");
@@ -393,39 +500,89 @@ export default function KdsAccountPage() {
                 </div>
               </div>
 
-              <div className="grid gap-4 sm:grid-cols-4">
-                <div>
-                  <label className="mb-1 block text-xs font-semibold text-slate-700">
-                    Phường / Xã
-                  </label>
-                  <input
-                    type="text"
-                    value={ward}
-                    onChange={(e) => setWard(e.target.value)}
-                    className="w-full rounded-xl border border-slate-300 px-3 py-2 text-sm outline-none focus:border-amber-500"
-                  />
-                </div>
-                <div>
-                  <label className="mb-1 block text-xs font-semibold text-slate-700">
-                    Quận / Huyện
-                  </label>
-                  <input
-                    type="text"
-                    value={district}
-                    onChange={(e) => setDistrict(e.target.value)}
-                    className="w-full rounded-xl border border-slate-300 px-3 py-2 text-sm outline-none focus:border-amber-500"
-                  />
-                </div>
+              <div className="grid gap-4 sm:grid-cols-3">
                 <div>
                   <label className="mb-1 block text-xs font-semibold text-slate-700">
                     Tỉnh / Thành phố
                   </label>
-                  <input
-                    type="text"
-                    value={province}
-                    onChange={(e) => setProvince(e.target.value)}
-                    className="w-full rounded-xl border border-slate-300 px-3 py-2 text-sm outline-none focus:border-amber-500"
-                  />
+                  <select
+                    value={
+                      selectedProvinceId ||
+                      (province ? "__legacy_province__" : "")
+                    }
+                    disabled={isLoadingDivisions}
+                    onChange={(e) => {
+                      const nextId = e.target.value;
+                      if (!nextId || nextId === "__legacy_province__") {
+                        setSelectedProvinceId("");
+                        setProvince("");
+                        setSelectedWardId("");
+                        setWard("");
+                        setSavedDivisionId("");
+                        return;
+                      }
+                      const matched = provinces.find((p) => p.id === nextId);
+                      setSelectedProvinceId(nextId);
+                      setProvince(matched?.name ?? "");
+                      setSelectedWardId("");
+                      setWard("");
+                      setSavedDivisionId("");
+                    }}
+                    className="w-full rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm outline-none focus:border-amber-500 disabled:bg-slate-50"
+                  >
+                    <option value="">
+                      {isLoadingDivisions
+                        ? "Đang tải Tỉnh / Thành phố..."
+                        : "-- Chọn Tỉnh / Thành phố --"}
+                    </option>
+                    {!selectedProvinceId && province ? (
+                      <option value="__legacy_province__">
+                        {province} (hiện tại)
+                      </option>
+                    ) : null}
+                    {provinces.map((item) => (
+                      <option key={item.id} value={item.id}>
+                        {item.name}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                <div>
+                  <label className="mb-1 block text-xs font-semibold text-slate-700">
+                    Phường / Xã
+                  </label>
+                  <select
+                    value={selectedWardId || (ward ? "__legacy_ward__" : "")}
+                    disabled={!selectedProvinceId || isLoadingWards}
+                    onChange={(e) => {
+                      const nextId = e.target.value;
+                      if (!nextId || nextId === "__legacy_ward__") {
+                        setSelectedWardId("");
+                        setWard("");
+                        return;
+                      }
+                      const matched = visibleWards.find((w) => w.id === nextId);
+                      setSelectedWardId(nextId);
+                      setWard(matched?.name ?? "");
+                    }}
+                    className="w-full rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm outline-none focus:border-amber-500 disabled:bg-slate-50"
+                  >
+                    <option value="">
+                      {!selectedProvinceId
+                        ? "-- Chọn Tỉnh / TP trước --"
+                        : isLoadingWards
+                          ? "Đang tải Phường / Xã..."
+                          : "-- Chọn Phường / Xã --"}
+                    </option>
+                    {!selectedWardId && ward ? (
+                      <option value="__legacy_ward__">{ward} (hiện tại)</option>
+                    ) : null}
+                    {visibleWards.map((item) => (
+                      <option key={item.id} value={item.id}>
+                        {item.name}
+                      </option>
+                    ))}
+                  </select>
                 </div>
                 <div>
                   <label className="mb-1 block text-xs font-semibold text-slate-700">

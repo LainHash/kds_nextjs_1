@@ -82,6 +82,7 @@ export interface AddressResponse {
   province: string;
   country: string;
   fullAddress?: string | null;
+  administrativeDivisionPublicId?: string | null;
 }
 
 export interface AddressRequest {
@@ -90,6 +91,8 @@ export interface AddressRequest {
   district?: string | null;
   province: string;
   country: string;
+  fullAddress?: string | null;
+  administrativeDivisionPublicId?: string | null;
 }
 
 export interface PersonalProfileResponse {

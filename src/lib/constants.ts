@@ -45,6 +45,7 @@ export const API_ENDPOINTS = {
   territory: {
     branches: "/api/territory/branches",
     branchById: (id: string) => `/api/territory/branches/${id}`,
+    administrativeDivisions: "/api/territory/administrative-division",
     areas: "/api/territory/areas",
     restaurantTables: "/api/territory/restaurant-tables",
     productBranches: "/api/territory/product-branches",
