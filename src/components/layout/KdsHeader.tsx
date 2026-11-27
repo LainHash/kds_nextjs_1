@@ -11,6 +11,7 @@ const NAV_ITEMS = [
   { href: "/history", label: "Lịch sử & Recall" },
   { href: "/branches", label: "Chi nhánh & Bàn" },
   { href: "/products", label: "Thực đơn & Kho" },
+  { href: "/account", label: "Tài khoản" },
 ] as const;
 
 export function KdsHeader() {
@@ -120,14 +121,18 @@ export function KdsHeader() {
           )}
 
           {user && (
-            <div className="hidden text-right md:block">
+            <Link
+              href="/account"
+              title="Thông tin tài khoản & Bảo mật"
+              className="hidden rounded-lg px-2 py-1 text-right transition hover:bg-slate-100 md:block"
+            >
               <p className="text-xs font-semibold text-slate-900">
                 {user.userName}
               </p>
               <p className="text-[11px] text-slate-500">
                 {user.organization?.positionName || user.role}
               </p>
-            </div>
+            </Link>
           )}
 
           <button

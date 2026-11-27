@@ -11,8 +11,11 @@ import type { ApiResult } from "@/types/api";
 import type {
   AuthenticationResponse,
   AuthUser,
+  ChangePasswordRequest,
   EmployeeResponse,
   LoginRequest,
+  UpdatePersonalProfileRequest,
+  UserDetailResponse,
   UserPermissionsResponse,
 } from "../types";
 
@@ -129,6 +132,28 @@ export async function getMyPermissions(): Promise<UserPermissionsResponse | null
     API_ENDPOINTS.identity.mePermissions
   );
   return result.data ?? null;
+}
+
+export async function getCurrentUser(): Promise<ApiResult<UserDetailResponse>> {
+  return apiFetch<ApiResult<UserDetailResponse>>(API_ENDPOINTS.identity.userMe);
+}
+
+export async function updateMyProfile(
+  payload: UpdatePersonalProfileRequest
+): Promise<ApiResult> {
+  return apiFetch<ApiResult>(API_ENDPOINTS.identity.userMeProfile, {
+    method: "PUT",
+    body: JSON.stringify(payload),
+  });
+}
+
+export async function changeMyPassword(
+  payload: ChangePasswordRequest
+): Promise<ApiResult> {
+  return apiFetch<ApiResult>(API_ENDPOINTS.identity.userMeChangePassword, {
+    method: "PATCH",
+    body: JSON.stringify(payload),
+  });
 }
 
 export async function getEmployeeByUserId(

@@ -74,3 +74,68 @@ export interface EmployeeResponse {
   terminationDate?: string | null;
   status: string;
 }
+
+export interface AddressResponse {
+  street: string;
+  ward?: string | null;
+  district?: string | null;
+  province: string;
+  country: string;
+  fullAddress?: string | null;
+}
+
+export interface AddressRequest {
+  street: string;
+  ward?: string | null;
+  district?: string | null;
+  province: string;
+  country: string;
+}
+
+export interface PersonalProfileResponse {
+  id: string;
+  firstName: string;
+  lastName: string;
+  dateOfBirth?: string | null;
+  gender: boolean;
+  address: AddressResponse;
+  phone: string;
+  citizenCardId: string;
+  avatarUrl?: string | null;
+  emergencyContactName?: string | null;
+  emergencyContactPhone?: string | null;
+}
+
+export interface UpdatePersonalProfileRequest {
+  firstName: string;
+  lastName: string;
+  dateOfBirth: string;
+  gender: boolean;
+  address: AddressRequest;
+  phone: string;
+  citizenCardId: string;
+  avatarUrl?: string | null;
+  emergencyContactName?: string | null;
+  emergencyContactPhone?: string | null;
+}
+
+export interface ChangePasswordRequest {
+  oldPassword: string;
+  newPassword: string;
+  confirmPassword: string;
+}
+
+export interface UserDetailResponse {
+  id: string;
+  userName: string;
+  email: string;
+  isConfirmed: boolean;
+  isActive: boolean;
+  isLocked: boolean;
+  mustChangePassword?: boolean;
+  passwordChangedAt?: string | null;
+  lastLoginAt?: string | null;
+  roleName: string;
+  createdAt?: string;
+  personalProfile?: PersonalProfileResponse | null;
+}

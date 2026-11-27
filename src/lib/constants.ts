@@ -31,6 +31,9 @@ export const API_ENDPOINTS = {
     logout: "/api/identity/authentication/logout",
     logoutAll: "/api/identity/authentication/logout-all",
     mePermissions: "/api/identity/authentication/me/permissions",
+    userMe: "/api/identity/users/me",
+    userMeProfile: "/api/identity/users/me/profile",
+    userMeChangePassword: "/api/identity/users/me/change-password",
     employeeByUser: (userId: string) =>
       `/api/identity/employees/by-user/${userId}`,
   },
